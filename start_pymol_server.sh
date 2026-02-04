@@ -33,7 +33,7 @@ echo
 # 检查服务器文件
 echo "[3/3] 检查服务器文件..."
 if [ ! -f "pymol_mcp_server.py" ]; then
-    echo "[错误] 未找到 pymol_mcp_server_http.py"
+    echo "[错误] 未找到 pymol_mcp_server.py"
     exit 1
 fi
 echo "[OK] 服务器文件存在"
@@ -49,4 +49,4 @@ echo "按Ctrl+C停止服务器"
 echo "=========================================="
 echo
 
-python3 pymol_mcp_server_http.py --host 127.0.0.1 --port 3000
+python3 pymol_mcp_server.py --host 127.0.0.1 --port 3000

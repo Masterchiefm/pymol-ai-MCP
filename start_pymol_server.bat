@@ -37,7 +37,7 @@ echo.
 REM 检查服务器文件
 echo [3/3] 检查服务器文件...
 if not exist pymol_mcp_server.py (
-    echo [错误] 未找到 pymol_mcp_server_http.py
+    echo [错误] 未找到 pymol_mcp_server.py
     pause
     exit /b 1
 )
@@ -54,6 +54,6 @@ echo 按Ctrl+C停止服务器
 echo ==========================================
 echo.
 
-python pymol_mcp_server_http.py --host 127.0.0.1 --port 3000
+python pymol_mcp_server.py --host 127.0.0.1 --port 3000
 
 pause
