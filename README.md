@@ -2,65 +2,121 @@
 
 通过MCP（Model Context Protocol）协议让AI控制PyMOL分子可视化软件。
 
+本项目使用 HTTP/SSE 模式，支持远程访问和多客户端连接。
+
 ## 架构说明
 
 ```
-┌─────────────┐      MCP协议      ┌─────────────────┐     XML-RPC     ┌─────────┐
-│  kimi-cli   │  ◄────────────►  │ pymol_mcp_server │  ◄──────────►  │  PyMOL  │
-│  (AI客户端)  │                  │   (MCP服务器)     │                │         │
-└─────────────┘                  └─────────────────┘                └─────────┘
+┌─────────────┐      HTTP/SSE     ┌─────────────────┐     XML-RPC     ┌─────────┐
+│  AI客户端   │  ◄────────────►  │ pymol_mcp_http  │  ◄──────────►  │  PyMOL  │
+│ (网络连接)   │                  │   (HTTP服务器)   │                │         │
+└─────────────┘                   └─────────────────┘                └─────────┘
+       ▲
+       │ HTTP/SSE
+       ▼
+┌─────────────┐
+│  其他客户端  │
+└─────────────┘
 ```
 
 ## 系统要求
 
 - Python 3.10+
 - PyMOL 2.0+（支持XML-RPC）
-- kimi-cli（支持MCP）
 
-## 5分钟快速开始
+## 快速开始
 
-### 1. 安装依赖 (1分钟)
+### 1. 安装依赖
 
 ```bash
-cd pymol-ai-controller
+pip install mcp starlette uvicorn
+```
+
+或安装全部依赖：
+
+```bash
 pip install -r requirements.txt
 ```
 
-### 2. 配置 MCP 服务器 (2分钟)
+### 2. 启动 HTTP 服务器
 
-**方法A: 使用命令行添加（推荐）**
+```bash
+# 基本启动（默认监听 127.0.0.1:3000）
+python pymol_mcp_server.py
+
+# 指定主机和端口
+python pymol_mcp_server.py --host 0.0.0.0 --port 3000
+
+# 指定PyMOL连接参数（如果PyMOL在远程）
+python pymol_mcp_server.py --pymol-host 192.168.1.100 --pymol-port 9123
+```
+
+或使用启动脚本：
 
 ```bash
 # Windows
-kimi mcp add --transport stdio pymol -- python "C:\path\to\pymol-ai-controller\pymol_mcp_server.py"
+start_pymol_server.bat
 
 # Linux/Mac
-kimi mcp add --transport stdio pymol -- python /path/to/pymol-ai-controller/pymol_mcp_server.py
+chmod +x start_pymol_server.sh
+./start_pymol_server.sh
 ```
 
-**方法B: 手动编辑配置文件**
+启动后，服务器将显示：
+```
+🚀 PyMOL MCP HTTP服务器已启动!
+   监听地址: http://127.0.0.1:3000
+   SSE端点:  http://127.0.0.1:3000/sse
+   健康检查: http://127.0.0.1:3000/health
+```
 
-编辑 `~/.kimi/mcp.json`（Windows: `%USERPROFILE%\.kimi\mcp.json`）：
+### 3. 在 MCP 客户端中配置 HTTP 连接
+
+**Qwen Code - 使用命令行:**
+
+```bash
+# 添加SSE服务器
+qwen mcp add --transport sse pymol http://127.0.0.1:3000/sse
+```
+
+**Qwen Code - 配置文件 (`.qwen/settings.json`):**
 
 ```json
 {
   "mcpServers": {
     "pymol": {
-      "command": "python",
-      "args": [
-        "/path/to/pymol-ai-controller/pymol_mcp_server.py"
-      ]
+      "url": "http://127.0.0.1:3000/sse",
+      "timeout": 30000
     }
   }
 }
 ```
 
-**验证配置:**
-```bash
-kimi mcp list
+**Cherry Studio - 配置文件:**
+
+```json
+{
+  "mcpServers": {
+    "pymol": {
+      "url": "http://127.0.0.1:3000/sse"
+    }
+  }
+}
 ```
 
-### 3. 启动 PyMOL (1分钟)
+**Claude Desktop - 配置文件 (`claude_desktop_config.json`):**
+
+```json
+{
+  "mcpServers": {
+    "pymol": {
+      "url": "http://127.0.0.1:3000/sse"
+    }
+  }
+}
+```
+
+### 4. 启动 PyMOL
 
 ```bash
 pymol -R
@@ -72,14 +128,9 @@ import pymol.rpc
 pymol.rpc.launch_XMLRPC()
 ```
 
-### 4. 开始使用 (无限可能)
+### 5. 开始使用
 
-启动 kimi-cli:
-```bash
-kimi
-```
-
-然后直接说出你的需求:
+现在可以直接对AI说出你的需求:
 
 ```
 "从PDB获取1AKE结构"
@@ -136,29 +187,65 @@ AI: 我来生成高质量的发表级图像。
 适合用于论文发表。
 ```
 
-## 详细安装步骤
+## 打包成EXE（可选）
 
-### 配置文件位置说明
+如果你想将MCP服务器打包成独立的可执行文件（无需Python环境），可以使用PyInstaller：
 
-kimi-cli的配置文件位置：
-- **Linux/Mac**: `~/.config/kimi/mcp.json`
-- **Windows**: `%APPDATA%\kimi\mcp.json` 或 `%USERPROFILE%\.kimi\mcp.json`
-
-Skill目录位置：
-- **Linux/Mac**: `~/.config/kimi/skills/`
-- **Windows**: `%APPDATA%\kimi\skills\`
-
-### 安装 Skill（可选）
-
-将 `skills/pymol-control` 目录复制到 kimi-cli 的 skills 目录：
+### 1. 安装 PyInstaller
 
 ```bash
-# Windows
-xcopy /E /I /Y skills\pymol-control "%APPDATA%\kimi\skills\pymol-control"
-
-# Linux/Mac
-cp -r skills/pymol-control ~/.config/kimi/skills/
+pip install pyinstaller
 ```
+
+### 2. 打包
+
+**使用提供的打包脚本:**
+```bash
+python build_exe.py
+```
+
+**或者手动打包:**
+```bash
+pyinstaller --onefile --console --name pymol-mcp-server pymol_mcp_server.py --hidden-import=starlette --hidden-import=uvicorn
+```
+
+打包完成后，可执行文件位于 `dist/pymol-mcp-server.exe`。
+
+**启动 EXE:**
+```bash
+pymol-mcp-server.exe --host 127.0.0.1 --port 3000
+```
+
+### 3. EXE版本的MCP配置
+
+使用EXE文件时，MCP配置：
+
+```json
+{
+  "mcpServers": {
+    "pymol": {
+      "url": "http://127.0.0.1:3000/sse"
+    }
+  }
+}
+```
+
+### 4. 注意事项
+
+- **文件大小**: 约 15-20MB（包含Starlette和Uvicorn）
+- **兼容性**: 打包的EXE只能在相同操作系统架构上运行
+- **杀毒软件**: 某些杀毒软件可能误报，需要添加信任
+- **防火墙**: HTTP服务器需要开放相应端口，请确保防火墙允许
+
+## 配置文件位置说明
+
+**Qwen Code (通义灵码)** 的配置文件位置：
+- **用户作用域**: `~/.qwen/settings.json` (Linux/Mac), `%USERPROFILE%\.qwen\settings.json` (Windows)
+- **项目作用域**: `.qwen/settings.json` (在项目根目录下)
+
+**Cherry Studio** 的配置文件位置：
+- **Linux/Mac**: `~/.config/cherry-studio/mcp.json`
+- **Windows**: `%APPDATA%\cherry-studio\mcp.json` 或 `%USERPROFILE%\.cherry-studio\mcp.json`
 
 ## 启动脚本
 
@@ -178,7 +265,7 @@ chmod +x start_pymol_server.sh
 脚本会自动：
 - 检查Python和依赖
 - 检查PyMOL MCP服务器文件
-- 启动MCP服务器
+- 启动HTTP MCP服务器
 - 提示需要启动PyMOL并启用XML-RPC
 
 ## 可用工具列表
@@ -201,10 +288,17 @@ chmod +x start_pymol_server.sh
 | 信息 | `pymol_get_names` | 获取对象列表 |
 | 信息 | `pymol_count_atoms` | 计算原子数 |
 | 信息 | `pymol_get_pdb` | 获取PDB字符串 |
+| 信息 | `pymol_get_selection_info` | 获取选择的链和残基信息 |
 | 渲染 | `pymol_ray` | 光线追踪 |
 | 渲染 | `pymol_draw` | OpenGL渲染 |
 | 渲染 | `pymol_png` | 保存PNG |
 | 高级 | `pymol_do` | 执行任意命令 |
+
+## API端点
+
+- **GET /sse** - SSE连接端点（客户端连接到此获取事件流）
+- **POST /messages/** - 消息发送端点（客户端发送JSON-RPC消息）
+- **GET /health** - 健康检查端点
 
 ## PyMOL 选择语法速查
 
@@ -268,14 +362,15 @@ AI：
 
 **检查:**
 ```bash
-kimi mcp list
+# Qwen Code
+qwen mcp list
 ```
 
 **解决:**
 ```bash
 # 重新添加
-kimi mcp remove pymol
-kimi mcp add --transport stdio pymol -- python "完整路径\pymol_mcp_server.py"
+qwen mcp remove pymol
+qwen mcp add --transport sse pymol http://127.0.0.1:3000/sse
 ```
 
 ### 问题: 无法连接到PyMOL

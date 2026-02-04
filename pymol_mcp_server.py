@@ -1,34 +1,46 @@
 #!/usr/bin/env python3
 """
-PyMOL MCP Server - 通过MCP协议让AI控制PyMOL
+PyMOL MCP Server (HTTP/SSE 版本) - 通过网络协议让AI控制PyMOL
 
 这个服务器作为桥梁，将PyMOL的XML-RPC接口包装为MCP工具，
-使kimi-cli或其他MCP客户端能够通过标准MCP协议控制PyMOL。
+使kimi-cli、qwen-code或其他MCP客户端能够通过HTTP/SSE协议控制PyMOL。
 
 使用方法:
     1. 启动PyMOL并启用XML-RPC服务器: pymol -R
-    2. 运行此服务器: python pymol_mcp_server.py
-    3. 在kimi-cli中配置MCP服务器指向此服务
+    2. 运行此服务器: python pymol_mcp_server.py [--host 0.0.0.0] [--port 3000]
+    3. 在MCP客户端中配置HTTP服务器指向 http://localhost:3000/sse
+
+API端点:
+    - GET /sse          - SSE连接端点（客户端连接到此获取事件流）
+    - POST /messages/   - 消息发送端点（客户端发送JSON-RPC消息）
+    - GET /health       - 健康检查端点
 """
 
 import asyncio
+import argparse
 import json
 import sys
 import xmlrpc.client
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import AsyncIterator, Dict, List, Optional, Any, Tuple
-from urllib.parse import urlparse
+from typing import AsyncIterator, Dict, List, Optional, Any
 
 # MCP SDK
 from mcp.server import Server
-from mcp.server.stdio import stdio_server
+from mcp.server.sse import SseServerTransport
 from mcp.types import (
     Tool,
     TextContent,
     ImageContent,
     LoggingLevel,
 )
+
+# HTTP服务器
+from starlette.applications import Starlette
+from starlette.routing import Route, Mount
+from starlette.responses import Response, JSONResponse
+from starlette.requests import Request
+import uvicorn
 
 
 @dataclass
@@ -65,7 +77,6 @@ class PyMOLConnection:
 
 # 全局连接实例
 pymol_conn = PyMOLConnection()
-
 
 # MCP服务器实例
 app = Server("pymol-controller")
@@ -349,7 +360,20 @@ async def list_tools() -> List[Tool]:
                 }
             }
         ),
-        
+        Tool(
+            name="pymol_get_selection_info",
+            description="获取选择中的链和残基信息",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "selection": {
+                        "type": "string",
+                        "description": "选择表达式（默认为 'sele'）"
+                    }
+                }
+            }
+        ),
+
         # 高级功能
         Tool(
             name="pymol_ray",
@@ -543,7 +567,82 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             selection = arguments.get("selection", "all")
             pdb_str = cmd.get_pdbstr(selection)
             return [TextContent(type="text", text=f"PDB格式:\n```\n{pdb_str[:2000]}\n```")]
-        
+
+        elif name == "pymol_get_selection_info":
+            """
+            获取选择中的链和残基信息
+
+            判断方法：
+            1. 获取选择的总原子数（使用 cmd.count_atoms）
+            2. 遍历所有可能的链标识符（A-Z），测试每个链在选择中的原子数
+            3. 获取 PDB 格式文本，解析出每个原子的链标识符和残基信息
+            4. 返回包含的链列表、每条链的原子数和残基范围
+            """
+            selection = arguments.get("selection", "sele")
+
+            # 获取总原子数
+            total_atoms = cmd.count_atoms(selection)
+
+            if total_atoms == 0:
+                return [TextContent(type="text", text=f"选择 '{selection}' 为空，没有选中任何原子")]
+
+            # 遍历所有可能的链标识符，收集链信息
+            chains_info = {}
+            possible_chains = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+            for chain_id in possible_chains:
+                chain_count = cmd.count_atoms(f"({selection}) and chain {chain_id}")
+                if chain_count > 0:
+                    chains_info[chain_id] = {"atom_count": chain_count}
+
+            # 获取 PDB 文本，提取残基信息
+            pdb_str = cmd.get_pdbstr(selection)
+            lines = pdb_str.split("\n")
+
+            # 解析每个原子的信息
+            for line in lines:
+                if line.startswith("ATOM") or line.startswith("HETATM"):
+                    # PDB 格式：链标识符在第 21 列（索引 21，从 0 开始）
+                    if len(line) > 21:
+                        chain_id = line[21]
+                        # 残基编号从第 22-26 列
+                        resi_str = line[22:26].strip()
+                        # 残基名称从第 17-20 列
+                        resn = line[17:20].strip()
+
+                        if chain_id in chains_info:
+                            if "residues" not in chains_info[chain_id]:
+                                chains_info[chain_id]["residues"] = []
+                            try:
+                                resi_num = int(resi_str)
+                                chains_info[chain_id]["residues"].append({
+                                    "resi": resi_num,
+                                    "resn": resn
+                                })
+                            except ValueError:
+                                pass
+
+            # 整理残基范围
+            result_text = f"选择 '{selection}' 信息：\n"
+            result_text += f"总原子数: {total_atoms}\n"
+            result_text += "包含的链:\n"
+
+            for chain_id, info in chains_info.items():
+                result_text += f"  链 {chain_id}: {info['atom_count']} 个原子"
+                if "residues" in info and info["residues"]:
+                    residues = info["residues"]
+                    residues.sort(key=lambda x: x["resi"])
+                    unique_resi = list({r["resi"] for r in residues})
+                    if unique_resi:
+                        min_resi = min(unique_resi)
+                        max_resi = max(unique_resi)
+                        if min_resi == max_resi:
+                            result_text += f", 残基 {min_resi} ({residues[0]['resn']})"
+                        else:
+                            result_text += f", 残基 {min_resi}-{max_resi}"
+                result_text += "\n"
+
+            return [TextContent(type="text", text=result_text)]
+
         # 高级功能
         elif name == "pymol_ray":
             width = arguments.get("width", 0)
@@ -579,21 +678,89 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
         return [TextContent(type="text", text=f"错误: {str(e)}")]
 
 
+def create_starlette_app(mcp_server: Server, sse_transport: SseServerTransport) -> Starlette:
+    """创建Starlette应用"""
+    
+    async def handle_sse(request: Request):
+        """处理SSE连接请求"""
+        async with sse_transport.connect_sse(
+            request.scope, request.receive, request._send
+        ) as (read_stream, write_stream):
+            await mcp_server.run(
+                read_stream,
+                write_stream,
+                mcp_server.create_initialization_options()
+            )
+        return Response()
+    
+    async def health_check(request: Request):
+        """健康检查端点"""
+        return JSONResponse({
+            "status": "ok",
+            "pymol_connected": pymol_conn._server is not None,
+            "server": "pymol-controller"
+        })
+    
+    async def root(request: Request):
+        """根路径 - 显示服务器信息"""
+        return JSONResponse({
+            "name": "PyMOL MCP Server",
+            "version": "1.0.0",
+            "endpoints": {
+                "/sse": "SSE连接端点 (用于MCP客户端连接)",
+                "/messages/": "消息发送端点 (POST请求)",
+                "/health": "健康检查端点"
+            },
+            "transport": "sse",
+            "pymol_connected": pymol_conn._server is not None
+        })
+    
+    routes = [
+        Route("/", endpoint=root, methods=["GET"]),
+        Route("/sse", endpoint=handle_sse, methods=["GET"]),
+        Route("/health", endpoint=health_check, methods=["GET"]),
+        Mount("/messages/", app=sse_transport.handle_post_message),
+    ]
+    
+    return Starlette(routes=routes)
+
+
 async def main():
-    """主函数 - 启动MCP服务器"""
+    """主函数 - 启动HTTP MCP服务器"""
+    parser = argparse.ArgumentParser(description="PyMOL MCP HTTP服务器")
+    parser.add_argument("--host", default="127.0.0.1", help="绑定地址 (默认: 127.0.0.1)")
+    parser.add_argument("--port", type=int, default=3000, help="监听端口 (默认: 3000)")
+    parser.add_argument("--pymol-host", default="localhost", help="PyMOL XML-RPC主机")
+    parser.add_argument("--pymol-port", type=int, default=9123, help="PyMOL XML-RPC端口")
+    args = parser.parse_args()
+    
+    # 配置PyMOL连接
+    pymol_conn.host = args.pymol_host
+    pymol_conn.port = args.pymol_port
+    
     # 尝试连接到PyMOL
     if not pymol_conn.connect():
         print("警告: 无法连接到PyMOL。请确保PyMOL已启动并启用了XML-RPC服务器。", file=sys.stderr)
         print("启动命令: pymol -R 或 pymol --rpc-server", file=sys.stderr)
         print("服务器将继续运行，等待PyMOL连接...", file=sys.stderr)
     
-    # 使用stdio传输启动MCP服务器
-    async with stdio_server() as (read_stream, write_stream):
-        await app.run(
-            read_stream,
-            write_stream,
-            app.create_initialization_options()
-        )
+    # 创建SSE传输
+    sse = SseServerTransport("/messages/")
+    
+    # 创建Starlette应用
+    starlette_app = create_starlette_app(app, sse)
+    
+    print(f"\n🚀 PyMOL MCP HTTP服务器已启动!")
+    print(f"   监听地址: http://{args.host}:{args.port}")
+    print(f"   SSE端点:  http://{args.host}:{args.port}/sse")
+    print(f"   健康检查: http://{args.host}:{args.port}/health")
+    print(f"\n在MCP客户端中使用此URL配置: http://{args.host}:{args.port}/sse")
+    print("")
+    
+    # 启动Uvicorn服务器
+    config = uvicorn.Config(starlette_app, host=args.host, port=args.port, log_level="info")
+    server = uvicorn.Server(config)
+    await server.serve()
 
 
 if __name__ == "__main__":

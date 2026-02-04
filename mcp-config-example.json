@@ -1,0 +1,11 @@
+{
+  "_comment": "MCP 配置示例 - 支持 Qwen Code / Cherry Studio / Claude Desktop (HTTP/SSE模式)",
+  
+  "mcpServers": {
+    "pymol-http": {
+      "_comment": "HTTP/SSE 模式配置",
+      "url": "http://127.0.0.1:3000/sse",
+      "timeout": 30000
+    }
+  }
+}
