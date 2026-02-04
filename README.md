@@ -294,6 +294,126 @@ chmod +x start_pymol_server.sh
 | 渲染 | `pymol_png` | 保存PNG |
 | 高级 | `pymol_do` | 执行任意命令 |
 
+## pymol_do 命令参考
+
+`pymol_do` 工具可以执行任意 PyMOL 命令，支持完整的命令行语法。
+
+### 常用命令速查
+
+#### 文件操作
+```
+load <file> [, <object>] [, <state>]     # 加载PDB/MOL/XYZ等文件
+save <file> [, <selection>]              # 保存结构
+fetch <code> [, <name>]                   # 从PDB数据库获取
+delete <name>                             # 删除对象
+create <name>, <selection>                # 创建新对象
+```
+
+#### 显示控制
+```
+show <rep> [, <selection>]    # 显示表示形式
+hide <rep> [, <selection>]    # 隐藏表示形式
+as <rep> [, <selection>]      # 切换表示形式
+
+表示形式(rep): lines, sticks, spheres, surface, mesh, cartoon, ribbon, dots
+```
+
+#### 颜色控制
+```
+color <color> [, <selection>]   # 设置颜色
+bg_color <color>                # 设置背景色
+util.cbc                        # 按链着色
+util.chainbow                   # 链彩虹色
+util.rainbow                    # 彩虹色
+util.ss                         # 二级结构着色
+```
+
+#### 预设样式
+```
+preset.simple <selection>          # 简单样式
+preset.ball_and_stick <selection>  # 球棍模型
+preset.ligands <selection>         # 配体样式
+preset.pretty <selection>          # 美观样式
+preset.publication <selection>     # 发表级样式
+preset.technical <selection>       # 技术样式
+preset.b_factor_putty <selection>  # B因子管状图
+```
+
+#### 视图控制
+```
+zoom <selection> [, <buffer>]   # 缩放到选择
+orient <selection>              # 定向到选择
+center <selection>              # 中心对齐
+reset                           # 重置视图
+turn <axis>, <angle>            # 旋转视图 (axis: x, y, z)
+move <axis>, <distance>         # 移动视图
+rock                            # 自动摇摆
+```
+
+#### 高级功能
+```
+ray [<width>, <height>]         # 光线追踪渲染
+draw [<width>, <height>]        # OpenGL渲染
+png <file> [, <w>, <h>, <dpi>]  # 保存图片
+scene <name>, store             # 保存场景
+scene <name>, recall            # 恢复场景
+mplay                           # 播放电影
+mstop                           # 停止电影
+```
+
+#### 分子操作
+```
+remove <selection>              # 删除原子
+extract <name>, <selection>     # 提取原子
+h_add <selection>               # 添加氢原子
+h_remove <selection>            # 删除氢原子
+remove solvent                  # 删除水分子
+remove hetero                   # 删除异质原子
+alter <selection>, <expr>       # 修改属性
+```
+
+#### 分析命令
+```
+distance <name>, <s1>, <s2>     # 测量距离
+angle <name>, <s1>, <s2>, <s3>  # 测量角度
+rms <sel1>, <sel2>              # 计算RMSD
+align <mobile>, <target>        # 结构对齐
+super <mobile>, <target>        # 高级对齐
+centerofmass <selection>        # 计算质心
+get_area <selection>            # 计算表面积
+```
+
+#### 选择语法示例
+```
+all                           # 所有原子
+chain A                       # A链
+resi 1-100                    # 残基1-100
+resn ALA                      # 丙氨酸
+name CA                       # alpha碳
+elem C                        # 碳原子
+organic                       # 有机配体
+hetatm                        # 异质原子
+sele                          # 当前选择
+(chain A and resi 50-100)     # 组合条件
+(all within 5 of resi 100)    # 距离选择
+```
+
+### 使用示例
+
+```python
+# 删除水分子并设置样式
+pymol_do: "remove solvent; util.cbc; show cartoon"
+
+# 高清渲染并保存
+pymol_do: "bg_color white; preset.publication (all); ray 2400, 2400; png output.png"
+
+# 分析配体结合位点
+pymol_do: "select ligand, organic; select site, ligand expand 5; show sticks, ligand|site"
+
+# 对齐结构
+pymol_do: "align structure1, structure2"
+```
+
 ## API端点
 
 - **GET /sse** - SSE连接端点（客户端连接到此获取事件流）
