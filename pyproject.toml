@@ -1,0 +1,16 @@
+[project]
+name = "pymol-ai-controller"
+version = "0.1.0"
+description = "通过MCP协议让AI控制PyMOL"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=1.0.0",
+]
+
+[project.scripts]
+pymol-mcp-server = "pymol_mcp_server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

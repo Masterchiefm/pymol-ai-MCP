@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "pymol": {
+      "command": "python",
+      "args": [
+        "C:\\path\\to\\pymol-ai-controller\\pymol_mcp_server.py"
+      ]
+    }
+  }
+}

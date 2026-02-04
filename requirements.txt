@@ -1,0 +1,2 @@
+# PyMOL AI Controller 依赖
+mcp>=1.0.0
