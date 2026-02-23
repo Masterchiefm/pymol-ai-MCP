@@ -1,5 +1,9 @@
 # PyMOL AI Controller
+## 插件
+MCP对于很多人来说不是那么好用，我另外做了一个ai插件，直接对话，不需要MCP等复杂调配。
+https://github.com/Masterchiefm/pymol-ai-assistant
 
+## MCP工具
 通过MCP（Model Context Protocol）协议让AI控制PyMOL分子可视化软件。
 
 本项目使用 HTTP/SSE 模式，支持远程访问和多客户端连接。
